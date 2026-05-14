@@ -1,17 +1,16 @@
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
 
-  const config = app.get(ConfigService);
-  const apiPrefix = config.get<string>('apiPrefix', 'api');
-  const swaggerEnabled = config.get<boolean>('swaggerEnabled', true);
-  const port = config.get<number>('port', 3000);
-
+  const apiPrefix = configService.get<string>('apiPrefix', 'api');
   app.setGlobalPrefix(apiPrefix);
 
   app.useGlobalPipes(
@@ -22,25 +21,33 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(
+    new ClassSerializerInterceptor(app.get(Reflector)),
+    new LoggingInterceptor(),
+  );
 
-  if (swaggerEnabled) {
-    const swaggerConfig = new DocumentBuilder()
+  app.enableCors();
+
+  if (configService.get<boolean>('swaggerEnabled')) {
+    const config = new DocumentBuilder()
       .setTitle('Library Loans API')
       .setDescription('Examen parcial ISIS 3710 — Sistema de préstamos de biblioteca')
       .setVersion('0.1.0')
       .addBearerAuth()
       .build();
-    const doc = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup(`${apiPrefix}/docs`, app, doc);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
   }
 
+  const port = configService.get<number>('port', 3000);
   await app.listen(port);
   // eslint-disable-next-line no-console
-  console.log(`Library Loans API en http://localhost:${port}/${apiPrefix}`);
-  if (swaggerEnabled) {
-    // eslint-disable-next-line no-console
-    console.log(`Swagger UI: http://localhost:${port}/${apiPrefix}/docs`);
-  }
+  console.log(`Library Loans API escuchando en puerto ${port}`, 'Bootstrap');
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('Fallo crítico al arrancar la aplicación', err);
+  process.exit(1);
+});
