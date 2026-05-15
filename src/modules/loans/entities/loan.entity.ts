@@ -15,14 +15,16 @@ export enum LoanStatus {
   ACTIVE = 'active',
   RETURNED = 'returned',
   OVERDUE = 'overdue',
+  LOST = 'lost',
 }
 
 @Entity({ name: 'loans' })
+@Index(['itemId', 'status'])
+@Index(['userId', 'status'])
 export class Loan {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Index()
   @Column({ type: 'uuid' })
   userId!: string;
 
@@ -30,7 +32,6 @@ export class Loan {
   @JoinColumn({ name: 'userId' })
   user?: User;
 
-  @Index()
   @Column({ type: 'uuid' })
   itemId!: string;
 
@@ -39,13 +40,13 @@ export class Loan {
   item?: Item;
 
   @Column({ type: 'timestamptz' })
-  loanDate!: Date;
+  loanedAt!: Date;
 
   @Column({ type: 'timestamptz' })
-  dueDate!: Date;
+  dueAt!: Date;
 
   @Column({ type: 'timestamptz', nullable: true })
-  returnDate!: Date | null;
+  returnedAt!: Date | null;
 
   @Column({ type: 'enum', enum: LoanStatus, default: LoanStatus.ACTIVE })
   status!: LoanStatus;
