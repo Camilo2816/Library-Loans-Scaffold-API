@@ -15,6 +15,7 @@ import { FindLoansDto } from './dto/find-loans.dto';
 import { UserRole } from '../users/entities/user.entity';
 import { AuthenticatedUser } from '@common/decorators/current-user.decorator';
 import { PaginatedResult } from '../users/users.service';
+import { ReservationsService } from '../reservations/reservations.service';
 
 const TERMINAL_STATUSES = [LoanStatus.RETURNED, LoanStatus.LOST];
 const RETURNABLE_STATUSES = [LoanStatus.ACTIVE, LoanStatus.OVERDUE];
@@ -27,6 +28,7 @@ export class LoansService {
     @InjectRepository(Item)
     private readonly itemsRepo: Repository<Item>,
     private readonly configService: ConfigService,
+    private readonly reservationsService: ReservationsService,
   ) {}
 
   async create(dto: CreateLoanDto, actor: AuthenticatedUser): Promise<Loan> {
@@ -147,7 +149,34 @@ export class LoansService {
       loan.fineAmount = 0;
     }
 
-    return this.loansRepo.save(loan);
+    const savedLoan = await this.loansRepo.save(loan);
+
+    // FIFO: fulfill next pending reservation for this item
+    await this.fulfillNextReservation(loan.itemId);
+
+    return savedLoan;
+  }
+
+  private async fulfillNextReservation(itemId: string): Promise<void> {
+    const next = await this.reservationsService.getNextPending(itemId);
+    if (!next) return;
+
+    const maxLoanDays = this.configService.get<number>('loans.maxLoanDays', 30);
+    const loanedAt = new Date();
+    const dueAt = new Date(loanedAt);
+    dueAt.setDate(dueAt.getDate() + maxLoanDays);
+
+    const newLoan = this.loansRepo.create({
+      userId: next.userId,
+      itemId,
+      loanedAt,
+      dueAt,
+      returnedAt: null,
+      status: LoanStatus.ACTIVE,
+      fineAmount: null,
+    });
+    await this.loansRepo.save(newLoan);
+    await this.reservationsService.markFulfilled(next.id);
   }
 
   async markLost(id: string): Promise<Loan> {

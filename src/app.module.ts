@@ -11,6 +11,7 @@ import { UsersModule } from './modules/users/users.module';
 import { ItemsModule } from './modules/items/items.module';
 import { LoansModule } from './modules/loans/loans.module';
 import { HealthModule } from './modules/health/health.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { HealthModule } from './modules/health/health.module';
     UsersModule,
     ItemsModule,
     LoansModule,
+    ReservationsModule,
     HealthModule,
   ],
   providers: [

@@ -12,12 +12,14 @@ import { Loan, LoanStatus } from './entities/loan.entity';
 import { Item, ItemType } from '../items/entities/item.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { AuthenticatedUser } from '@common/decorators/current-user.decorator';
+import { ReservationsService } from '../reservations/reservations.service';
 
 describe('LoansService', () => {
   let service: LoansService;
   let loansRepo: any;
   let itemsRepo: any;
   let configService: any;
+  let reservationsService: any;
 
   const memberActor: AuthenticatedUser = { id: 'u-1', email: 'a@b.com', role: UserRole.MEMBER };
   const adminActor: AuthenticatedUser = {
@@ -93,6 +95,10 @@ describe('LoansService', () => {
         return map[key] ?? def;
       }),
     };
+    reservationsService = {
+      getNextPending: jest.fn().mockResolvedValue(null),
+      markFulfilled: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -100,6 +106,7 @@ describe('LoansService', () => {
         { provide: getRepositoryToken(Loan), useValue: loansRepo },
         { provide: getRepositoryToken(Item), useValue: itemsRepo },
         { provide: ConfigService, useValue: configService },
+        { provide: ReservationsService, useValue: reservationsService },
       ],
     }).compile();
 
@@ -230,6 +237,38 @@ describe('LoansService', () => {
     it('lanza BadRequestException si el préstamo ya está en estado terminal', async () => {
       loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.LOST }));
       await expect(service.markLost('l-1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // ─── FIFO: fulfillNextReservation on return ───────────────────────────────
+  describe('returnLoan — FIFO reservations', () => {
+    it('crea un préstamo para la siguiente reserva pendiente al devolver', async () => {
+      const loan = makeLoan();
+      loansRepo.findOne.mockResolvedValue(loan);
+      reservationsService.getNextPending.mockResolvedValue({
+        id: 'r-1',
+        userId: 'u-2',
+        itemId: 'i-1',
+      });
+
+      await service.returnLoan('l-1');
+
+      expect(reservationsService.getNextPending).toHaveBeenCalledWith('i-1');
+      expect(loansRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'u-2', itemId: 'i-1', status: LoanStatus.ACTIVE }),
+      );
+      expect(reservationsService.markFulfilled).toHaveBeenCalledWith('r-1');
+    });
+
+    it('no crea préstamo si no hay reservas pendientes', async () => {
+      const loan = makeLoan();
+      loansRepo.findOne.mockResolvedValue(loan);
+      reservationsService.getNextPending.mockResolvedValue(null);
+
+      await service.returnLoan('l-1');
+
+      expect(loansRepo.create).not.toHaveBeenCalled();
+      expect(reservationsService.markFulfilled).not.toHaveBeenCalled();
     });
   });
 
