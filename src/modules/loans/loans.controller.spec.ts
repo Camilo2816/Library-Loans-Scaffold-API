@@ -9,8 +9,11 @@ describe('LoansController', () => {
   const memberActor = { id: 'u-1', email: 'a@b.com', role: UserRole.MEMBER };
   const adminActor = { id: 'admin', email: 'admin@b.com', role: UserRole.ADMIN };
   const mockLoan = {
-    id: 'l-1', userId: 'u-1', itemId: 'i-1',
-    status: LoanStatus.ACTIVE, fineAmount: null,
+    id: 'l-1',
+    userId: 'u-1',
+    itemId: 'i-1',
+    status: LoanStatus.ACTIVE,
+    fineAmount: null,
   };
 
   beforeEach(() => {

@@ -18,7 +18,10 @@ describe('AuthController', () => {
 
   it('register delega al service', async () => {
     await controller.register({
-      email: 'a@b.com', password: 'pw12345678', firstName: 'A', lastName: 'B',
+      email: 'a@b.com',
+      password: 'pw12345678',
+      firstName: 'A',
+      lastName: 'B',
     });
     expect(service.register).toHaveBeenCalled();
   });

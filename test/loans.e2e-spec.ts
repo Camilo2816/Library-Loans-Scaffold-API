@@ -115,7 +115,15 @@ describe('Loans (e2e)', () => {
     // Crear 3 préstamos activos directamente en BD
     for (let i = 0; i < 3; i++) {
       const item = await itemRepo.save(
-        itemRepo.create({ title: `Libro ${i}`, author: 'A', totalCopies: 1, availableCopies: 0, isbn: null, description: null, isActive: true }),
+        itemRepo.create({
+          title: `Libro ${i}`,
+          author: 'A',
+          totalCopies: 1,
+          availableCopies: 0,
+          isbn: null,
+          description: null,
+          isActive: true,
+        }),
       );
       const due = new Date();
       due.setDate(due.getDate() + 30);
@@ -133,7 +141,15 @@ describe('Loans (e2e)', () => {
     }
 
     const newItem = await itemRepo.save(
-      itemRepo.create({ title: 'Extra', author: 'A', totalCopies: 1, availableCopies: 1, isbn: null, description: null, isActive: true }),
+      itemRepo.create({
+        title: 'Extra',
+        author: 'A',
+        totalCopies: 1,
+        availableCopies: 1,
+        isbn: null,
+        description: null,
+        isActive: true,
+      }),
     );
 
     await request(app.getHttpServer())
@@ -177,11 +193,15 @@ describe('Loans (e2e)', () => {
     const item2 = await seedItem();
 
     await request(app.getHttpServer())
-      .post('/api/loans').set('Authorization', `Bearer ${member1.accessToken}`)
-      .send({ itemId: item1.id }).expect(201);
+      .post('/api/loans')
+      .set('Authorization', `Bearer ${member1.accessToken}`)
+      .send({ itemId: item1.id })
+      .expect(201);
     await request(app.getHttpServer())
-      .post('/api/loans').set('Authorization', `Bearer ${member2.accessToken}`)
-      .send({ itemId: item2.id }).expect(201);
+      .post('/api/loans')
+      .set('Authorization', `Bearer ${member2.accessToken}`)
+      .send({ itemId: item2.id })
+      .expect(201);
 
     const list = await request(app.getHttpServer())
       .get('/api/loans')

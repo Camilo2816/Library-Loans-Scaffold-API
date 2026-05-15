@@ -57,7 +57,9 @@ describe('Items (e2e)', () => {
   it('rechaza ISBN duplicado con 400', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
     await createItem(librarian.accessToken, { isbn: '978-1-23-456789-0' }).expect(201);
-    await createItem(librarian.accessToken, { isbn: '978-1-23-456789-0', title: 'Otro' }).expect(400);
+    await createItem(librarian.accessToken, { isbn: '978-1-23-456789-0', title: 'Otro' }).expect(
+      400,
+    );
   });
 
   it('MEMBER no puede crear ítems (403)', async () => {
@@ -83,8 +85,13 @@ describe('Items (e2e)', () => {
 
   it('busca ítems por título (search)', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    await createItem(librarian.accessToken, { title: 'Don Quijote', author: 'Cervantes' }).expect(201);
-    await createItem(librarian.accessToken, { title: 'Cien años de soledad', author: 'García Márquez' }).expect(201);
+    await createItem(librarian.accessToken, { title: 'Don Quijote', author: 'Cervantes' }).expect(
+      201,
+    );
+    await createItem(librarian.accessToken, {
+      title: 'Cien años de soledad',
+      author: 'García Márquez',
+    }).expect(201);
 
     const res = await request(app.getHttpServer())
       .get('/api/items?search=Quijote')

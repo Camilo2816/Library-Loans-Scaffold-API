@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Item, ItemType } from './entities/item.entity';
+import { Item } from './entities/item.entity';
 import { Loan, LoanStatus } from '../loans/entities/loan.entity';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';

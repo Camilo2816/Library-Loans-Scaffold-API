@@ -42,7 +42,9 @@ describe('RolesGuard', () => {
   });
 
   it('permite paso si el rol del usuario está en la lista', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.ADMIN, UserRole.LIBRARIAN]);
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue([UserRole.ADMIN, UserRole.LIBRARIAN]);
     expect(guard.canActivate(ctx({ id: '1', role: UserRole.LIBRARIAN }))).toBe(true);
   });
 

@@ -29,7 +29,8 @@ export class LoansService {
     private readonly configService: ConfigService,
   ) {}
 
-  async create(dto: CreateLoanDto, _actor: AuthenticatedUser): Promise<Loan> {
+  async create(dto: CreateLoanDto, actor: AuthenticatedUser): Promise<Loan> {
+    void actor;
     const maxActiveLoans = this.configService.get<number>('loans.maxActivePerUser', 3);
     const maxLoanDays = this.configService.get<number>('loans.maxLoanDays', 30);
 
@@ -50,9 +51,7 @@ export class LoansService {
       where: { userId: dto.userId, status: In([LoanStatus.ACTIVE, LoanStatus.OVERDUE]) },
     });
     if (activeCount >= maxActiveLoans) {
-      throw new ConflictException(
-        `El usuario ya tiene ${maxActiveLoans} préstamos activos`,
-      );
+      throw new ConflictException(`El usuario ya tiene ${maxActiveLoans} préstamos activos`);
     }
 
     // R2 — disponibilidad item
@@ -131,9 +130,7 @@ export class LoansService {
       throw new NotFoundException(`Préstamo ${id} no encontrado`);
     }
     if (!RETURNABLE_STATUSES.includes(loan.status)) {
-      throw new BadRequestException(
-        `No se puede devolver un préstamo en estado "${loan.status}"`,
-      );
+      throw new BadRequestException(`No se puede devolver un préstamo en estado "${loan.status}"`);
     }
 
     const returnedAt = new Date();
@@ -159,14 +156,10 @@ export class LoansService {
       throw new NotFoundException(`Préstamo ${id} no encontrado`);
     }
     if (TERMINAL_STATUSES.includes(loan.status)) {
-      throw new BadRequestException(
-        `No se puede modificar un préstamo en estado "${loan.status}"`,
-      );
+      throw new BadRequestException(`No se puede modificar un préstamo en estado "${loan.status}"`);
     }
     if (!RETURNABLE_STATUSES.includes(loan.status)) {
-      throw new BadRequestException(
-        `Transición inválida desde estado "${loan.status}"`,
-      );
+      throw new BadRequestException(`Transición inválida desde estado "${loan.status}"`);
     }
     loan.status = LoanStatus.LOST;
     return this.loansRepo.save(loan);

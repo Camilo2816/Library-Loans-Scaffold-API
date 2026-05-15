@@ -5,7 +5,13 @@ describe('ItemsController', () => {
   let controller: ItemsController;
   let service: any;
 
-  const mockItem = { id: 'i-1', code: 'LIB-001', title: 'Libro', type: ItemType.BOOK, isAvailable: true };
+  const mockItem = {
+    id: 'i-1',
+    code: 'LIB-001',
+    title: 'Libro',
+    type: ItemType.BOOK,
+    isAvailable: true,
+  };
 
   beforeEach(() => {
     service = {

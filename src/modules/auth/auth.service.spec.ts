@@ -116,7 +116,12 @@ describe('AuthService', () => {
   describe('register', () => {
     it('crea siempre con rol MEMBER por defecto', async () => {
       usersService.create.mockResolvedValue(makeUser());
-      await service.register({ email: 'n@n.com', password: 'pw12345678', firstName: 'N', lastName: 'N' });
+      await service.register({
+        email: 'n@n.com',
+        password: 'pw12345678',
+        firstName: 'N',
+        lastName: 'N',
+      });
       expect(usersService.create).toHaveBeenCalledWith(
         expect.objectContaining({ role: UserRole.MEMBER }),
       );
@@ -125,7 +130,13 @@ describe('AuthService', () => {
     it('respeta rol distinto solo si el actor es ADMIN', async () => {
       usersService.create.mockResolvedValue(makeUser({ role: UserRole.LIBRARIAN }));
       await service.register(
-        { email: 'lib@n.com', password: 'pw12345678', firstName: 'L', lastName: 'L', role: UserRole.LIBRARIAN },
+        {
+          email: 'lib@n.com',
+          password: 'pw12345678',
+          firstName: 'L',
+          lastName: 'L',
+          role: UserRole.LIBRARIAN,
+        },
         UserRole.ADMIN,
       );
       expect(usersService.create).toHaveBeenCalledWith(
@@ -136,7 +147,13 @@ describe('AuthService', () => {
     it('ignora rol distinto si el actor no es ADMIN', async () => {
       usersService.create.mockResolvedValue(makeUser());
       await service.register(
-        { email: 'x@n.com', password: 'pw12345678', firstName: 'X', lastName: 'X', role: UserRole.LIBRARIAN },
+        {
+          email: 'x@n.com',
+          password: 'pw12345678',
+          firstName: 'X',
+          lastName: 'X',
+          role: UserRole.LIBRARIAN,
+        },
         UserRole.MEMBER,
       );
       expect(usersService.create).toHaveBeenCalledWith(
@@ -155,8 +172,10 @@ describe('AuthService', () => {
 
     it('lanza ForbiddenException si el token está revocado', async () => {
       refreshRepo.findOne.mockResolvedValue({
-        token: 'rt', userId: 'u-1',
-        expiresAt: new Date(Date.now() + 10000), revokedAt: new Date(),
+        token: 'rt',
+        userId: 'u-1',
+        expiresAt: new Date(Date.now() + 10000),
+        revokedAt: new Date(),
       });
       await expect(service.refresh('rt', { sub: 'u-1', email: 'a@b.com' })).rejects.toBeInstanceOf(
         ForbiddenException,
@@ -165,8 +184,10 @@ describe('AuthService', () => {
 
     it('lanza ForbiddenException si el token no corresponde al usuario', async () => {
       refreshRepo.findOne.mockResolvedValue({
-        token: 'rt', userId: 'other',
-        expiresAt: new Date(Date.now() + 10000), revokedAt: null,
+        token: 'rt',
+        userId: 'other',
+        expiresAt: new Date(Date.now() + 10000),
+        revokedAt: null,
       });
       await expect(service.refresh('rt', { sub: 'u-1', email: 'a@b.com' })).rejects.toBeInstanceOf(
         ForbiddenException,
@@ -175,8 +196,10 @@ describe('AuthService', () => {
 
     it('genera nuevo access token con token válido', async () => {
       refreshRepo.findOne.mockResolvedValue({
-        token: 'rt', userId: 'u-1',
-        expiresAt: new Date(Date.now() + 10000), revokedAt: null,
+        token: 'rt',
+        userId: 'u-1',
+        expiresAt: new Date(Date.now() + 10000),
+        revokedAt: null,
       });
       usersService.findById.mockResolvedValue(makeUser());
       const out = await service.refresh('rt', { sub: 'u-1', email: 'a@b.com' });

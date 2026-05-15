@@ -36,11 +36,17 @@ describe('HttpExceptionFilter', () => {
 
   it('serializa HttpException con body objeto (array de mensajes)', () => {
     filter.catch(
-      new BadRequestException({ message: ['campo requerido', 'email inválido'], error: 'Bad Request' }),
+      new BadRequestException({
+        message: ['campo requerido', 'email inválido'],
+        error: 'Bad Request',
+      }),
       host,
     );
     expect(response.json).toHaveBeenCalledWith(
-      expect.objectContaining({ message: ['campo requerido', 'email inválido'], error: 'Bad Request' }),
+      expect.objectContaining({
+        message: ['campo requerido', 'email inválido'],
+        error: 'Bad Request',
+      }),
     );
   });
 

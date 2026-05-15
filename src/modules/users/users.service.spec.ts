@@ -46,7 +46,10 @@ describe('UsersService', () => {
     it('hashea el password antes de guardar (nunca almacena en plano)', async () => {
       repo.findOne.mockResolvedValue(null);
       const created = await service.create({
-        email: 'new@b.com', password: 'pw12345678', firstName: 'N', lastName: 'N',
+        email: 'new@b.com',
+        password: 'pw12345678',
+        firstName: 'N',
+        lastName: 'N',
       });
       expect(created.passwordHash).toBeDefined();
       expect(created.passwordHash).not.toBe('pw12345678');
@@ -57,7 +60,10 @@ describe('UsersService', () => {
     it('asigna rol MEMBER por defecto', async () => {
       repo.findOne.mockResolvedValue(null);
       const u = await service.create({
-        email: 'x@b.com', password: 'pw12345678', firstName: 'X', lastName: 'X',
+        email: 'x@b.com',
+        password: 'pw12345678',
+        firstName: 'X',
+        lastName: 'X',
       });
       expect(u.role).toBe(UserRole.MEMBER);
     });
@@ -65,8 +71,11 @@ describe('UsersService', () => {
     it('usa el rol especificado cuando se proporciona', async () => {
       repo.findOne.mockResolvedValue(null);
       const u = await service.create({
-        email: 'lib@b.com', password: 'pw12345678',
-        firstName: 'L', lastName: 'L', role: UserRole.LIBRARIAN,
+        email: 'lib@b.com',
+        password: 'pw12345678',
+        firstName: 'L',
+        lastName: 'L',
+        role: UserRole.LIBRARIAN,
       });
       expect(u.role).toBe(UserRole.LIBRARIAN);
     });

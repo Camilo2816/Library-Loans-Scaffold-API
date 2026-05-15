@@ -20,7 +20,12 @@ describe('Auth (e2e)', () => {
   it('flujo completo: register → login → /me → refresh → logout → refresh falla', async () => {
     const reg = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: 'flow@library.test', password: 'StrongPass123!', firstName: 'Flow', lastName: 'User' })
+      .send({
+        email: 'flow@library.test',
+        password: 'StrongPass123!',
+        firstName: 'Flow',
+        lastName: 'User',
+      })
       .expect(201);
     expect(reg.body.accessToken).toBeDefined();
     expect(reg.body.refreshToken).toBeDefined();
@@ -30,7 +35,10 @@ describe('Auth (e2e)', () => {
       .send({ email: 'flow@library.test', password: 'StrongPass123!' })
       .expect(200);
 
-    const { accessToken, refreshToken } = login.body as { accessToken: string; refreshToken: string };
+    const { accessToken, refreshToken } = login.body as {
+      accessToken: string;
+      refreshToken: string;
+    };
 
     const me = await request(app.getHttpServer())
       .get('/api/auth/me')
@@ -51,16 +59,18 @@ describe('Auth (e2e)', () => {
       .expect(204);
 
     // token revocado tras logout
-    await request(app.getHttpServer())
-      .post('/api/auth/refresh')
-      .send({ refreshToken })
-      .expect(403);
+    await request(app.getHttpServer()).post('/api/auth/refresh').send({ refreshToken }).expect(403);
   });
 
   it('register crea usuario con rol MEMBER por defecto', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: 'member@library.test', password: 'StrongPass123!', firstName: 'M', lastName: 'M' })
+      .send({
+        email: 'member@library.test',
+        password: 'StrongPass123!',
+        firstName: 'M',
+        lastName: 'M',
+      })
       .expect(201);
     expect(res.body.user.role).toBe('member');
   });
@@ -68,7 +78,12 @@ describe('Auth (e2e)', () => {
   it('rechaza login con contraseña incorrecta con 401', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: 'badpw@library.test', password: 'StrongPass123!', firstName: 'B', lastName: 'P' })
+      .send({
+        email: 'badpw@library.test',
+        password: 'StrongPass123!',
+        firstName: 'B',
+        lastName: 'P',
+      })
       .expect(201);
 
     await request(app.getHttpServer())
@@ -80,12 +95,22 @@ describe('Auth (e2e)', () => {
   it('rechaza registro con email duplicado con 409', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: 'dup@library.test', password: 'StrongPass123!', firstName: 'D', lastName: 'U' })
+      .send({
+        email: 'dup@library.test',
+        password: 'StrongPass123!',
+        firstName: 'D',
+        lastName: 'U',
+      })
       .expect(201);
 
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: 'dup@library.test', password: 'OtherPass123!', firstName: 'D2', lastName: 'U2' })
+      .send({
+        email: 'dup@library.test',
+        password: 'OtherPass123!',
+        firstName: 'D2',
+        lastName: 'U2',
+      })
       .expect(409);
   });
 

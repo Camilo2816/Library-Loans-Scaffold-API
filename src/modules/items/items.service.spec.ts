@@ -70,7 +70,11 @@ describe('ItemsService', () => {
 
     it('retorna el ítem con isAvailable: true al crearlo', async () => {
       itemsRepo.findOne.mockResolvedValue(null);
-      const result = await service.create({ code: 'LIB-003', title: 'Nuevo', type: ItemType.EQUIPMENT });
+      const result = await service.create({
+        code: 'LIB-003',
+        title: 'Nuevo',
+        type: ItemType.EQUIPMENT,
+      });
       expect(result.isAvailable).toBe(true);
     });
   });
@@ -108,7 +112,9 @@ describe('ItemsService', () => {
 
     it('lanza NotFoundException si el ítem no existe', async () => {
       itemsRepo.findOne.mockResolvedValue(null);
-      await expect(service.update('bad-id', { title: 'X' })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.update('bad-id', { title: 'X' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 

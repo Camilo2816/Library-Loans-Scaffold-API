@@ -20,7 +20,11 @@ describe('LoansService', () => {
   let configService: any;
 
   const memberActor: AuthenticatedUser = { id: 'u-1', email: 'a@b.com', role: UserRole.MEMBER };
-  const adminActor: AuthenticatedUser = { id: 'admin-1', email: 'admin@b.com', role: UserRole.ADMIN };
+  const adminActor: AuthenticatedUser = {
+    id: 'admin-1',
+    email: 'admin@b.com',
+    role: UserRole.ADMIN,
+  };
 
   const makeItem = (overrides: Partial<Item> = {}): Item =>
     ({
@@ -240,9 +244,7 @@ describe('LoansService', () => {
 
     it('lanza ForbiddenException si un MEMBER intenta ver el préstamo de otro', async () => {
       loansRepo.findOne.mockResolvedValue(makeLoan({ userId: 'u-other' }));
-      await expect(service.findById('l-1', memberActor)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      await expect(service.findById('l-1', memberActor)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('un ADMIN puede ver el préstamo de cualquier usuario', async () => {

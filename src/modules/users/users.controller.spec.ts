@@ -28,12 +28,20 @@ describe('UsersController', () => {
   });
 
   it('findOne permite al propio usuario ver sus datos', async () => {
-    const out = await controller.findOne('u-1', { id: 'u-1', email: 'a@b.com', role: UserRole.MEMBER });
+    const out = await controller.findOne('u-1', {
+      id: 'u-1',
+      email: 'a@b.com',
+      role: UserRole.MEMBER,
+    });
     expect(out.id).toBe('u-1');
   });
 
   it('findOne permite al ADMIN ver cualquier usuario', async () => {
-    const out = await controller.findOne('u-1', { id: 'admin', email: 'admin@b.com', role: UserRole.ADMIN });
+    const out = await controller.findOne('u-1', {
+      id: 'admin',
+      email: 'admin@b.com',
+      role: UserRole.ADMIN,
+    });
     expect(out.id).toBe('u-1');
   });
 
