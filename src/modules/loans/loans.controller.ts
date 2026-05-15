@@ -24,6 +24,7 @@ import { UserRole } from '../users/entities/user.entity';
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}
 
+  @Roles(UserRole.ADMIN, UserRole.LIBRARIAN)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateLoanDto, @CurrentUser() actor: AuthenticatedUser) {
@@ -44,5 +45,11 @@ export class LoansController {
   @Patch(':id/return')
   returnLoan(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.loansService.returnLoan(id);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.LIBRARIAN)
+  @Patch(':id/mark-lost')
+  markLost(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.loansService.markLost(id);
   }
 }

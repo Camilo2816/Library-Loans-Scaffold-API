@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Loan, LoanStatus } from './entities/loan.entity';
 import { Item } from '../items/entities/item.entity';
@@ -14,6 +15,9 @@ import { FindLoansDto } from './dto/find-loans.dto';
 import { UserRole } from '../users/entities/user.entity';
 import { AuthenticatedUser } from '@common/decorators/current-user.decorator';
 import { PaginatedResult } from '../users/users.service';
+
+const TERMINAL_STATUSES = [LoanStatus.RETURNED, LoanStatus.LOST];
+const RETURNABLE_STATUSES = [LoanStatus.ACTIVE, LoanStatus.OVERDUE];
 
 @Injectable()
 export class LoansService {
@@ -25,40 +29,50 @@ export class LoansService {
     private readonly configService: ConfigService,
   ) {}
 
-  async create(dto: CreateLoanDto, actor: AuthenticatedUser): Promise<Loan> {
+  async create(dto: CreateLoanDto, _actor: AuthenticatedUser): Promise<Loan> {
     const maxActiveLoans = this.configService.get<number>('loans.maxActivePerUser', 3);
     const maxLoanDays = this.configService.get<number>('loans.maxLoanDays', 30);
 
+    const loanedAt = new Date();
+    const dueAt = new Date(dto.dueAt);
+
+    // R1 — validación fechas
+    if (dueAt <= loanedAt) {
+      throw new BadRequestException('dueAt debe ser posterior a la fecha actual');
+    }
+    const diffDays = (dueAt.getTime() - loanedAt.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDays > maxLoanDays) {
+      throw new BadRequestException(`El préstamo no puede exceder ${maxLoanDays} días`);
+    }
+
+    // R3 — límite préstamos usuario
     const activeCount = await this.loansRepo.count({
-      where: { userId: actor.id, status: LoanStatus.ACTIVE },
+      where: { userId: dto.userId, status: In([LoanStatus.ACTIVE, LoanStatus.OVERDUE]) },
     });
     if (activeCount >= maxActiveLoans) {
-      throw new BadRequestException(
-        `No puede tener más de ${maxActiveLoans} préstamos activos simultáneamente`,
+      throw new ConflictException(
+        `El usuario ya tiene ${maxActiveLoans} préstamos activos`,
       );
     }
 
-    const item = await this.itemsRepo.findOne({ where: { id: dto.itemId } });
-    if (!item || !item.isActive) {
+    // R2 — disponibilidad item
+    const item = await this.itemsRepo.findOne({ where: { id: dto.itemId, isActive: true } });
+    if (!item) {
       throw new NotFoundException(`Ítem ${dto.itemId} no encontrado`);
     }
-    if (item.availableCopies <= 0) {
-      throw new BadRequestException('No hay copias disponibles de este ítem');
+    const activeLoan = await this.loansRepo.findOne({
+      where: { itemId: dto.itemId, status: In([LoanStatus.ACTIVE, LoanStatus.OVERDUE]) },
+    });
+    if (activeLoan) {
+      throw new ConflictException('El ítem ya tiene un préstamo activo');
     }
 
-    const loanDate = new Date();
-    const dueDate = new Date(loanDate);
-    dueDate.setDate(dueDate.getDate() + maxLoanDays);
-
-    item.availableCopies -= 1;
-    await this.itemsRepo.save(item);
-
     const loan = this.loansRepo.create({
-      userId: actor.id,
+      userId: dto.userId,
       itemId: dto.itemId,
-      loanDate,
-      dueDate,
-      returnDate: null,
+      loanedAt,
+      dueAt,
+      returnedAt: null,
       status: LoanStatus.ACTIVE,
       fineAmount: null,
     });
@@ -66,7 +80,7 @@ export class LoansService {
   }
 
   async findAll(query: FindLoansDto, actor: AuthenticatedUser): Promise<PaginatedResult<Loan>> {
-    const { page, limit, status, userId } = query;
+    const { page, limit, status, userId, itemId } = query as FindLoansDto & { itemId?: string };
     const isStaff = actor.role === UserRole.ADMIN || actor.role === UserRole.LIBRARIAN;
 
     const qb = this.loansRepo
@@ -78,6 +92,10 @@ export class LoansService {
       qb.where('l.userId = :uid', { uid: actor.id });
     } else if (userId) {
       qb.where('l.userId = :uid', { uid: userId });
+    }
+
+    if (itemId) {
+      qb.andWhere('l.itemId = :itemId', { itemId });
     }
 
     if (status) {
@@ -108,34 +126,49 @@ export class LoansService {
   }
 
   async returnLoan(id: string): Promise<Loan> {
-    const loan = await this.loansRepo.findOne({ where: { id }, relations: ['item'] });
+    const loan = await this.loansRepo.findOne({ where: { id } });
     if (!loan) {
       throw new NotFoundException(`Préstamo ${id} no encontrado`);
     }
-    if (loan.status !== LoanStatus.ACTIVE) {
-      throw new BadRequestException('El préstamo ya fue devuelto o está vencido');
-    }
-
-    const returnDate = new Date();
-    loan.returnDate = returnDate;
-
-    if (returnDate > loan.dueDate) {
-      const dailyFineRate = this.configService.get<number>('loans.dailyFineRate', 0.5);
-      const daysLate = Math.floor(
-        (returnDate.getTime() - loan.dueDate.getTime()) / (1000 * 60 * 60 * 24),
+    if (!RETURNABLE_STATUSES.includes(loan.status)) {
+      throw new BadRequestException(
+        `No se puede devolver un préstamo en estado "${loan.status}"`,
       );
-      loan.fineAmount = parseFloat((daysLate * dailyFineRate).toFixed(2));
-      loan.status = LoanStatus.OVERDUE;
+    }
+
+    const returnedAt = new Date();
+    loan.returnedAt = returnedAt;
+    loan.status = LoanStatus.RETURNED;
+
+    if (returnedAt > loan.dueAt) {
+      const dailyFineRate = this.configService.get<number>('loans.dailyFineRate', 0.5);
+      const daysOverdue = Math.ceil(
+        (returnedAt.getTime() - loan.dueAt.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      loan.fineAmount = parseFloat((daysOverdue * dailyFineRate).toFixed(2));
     } else {
-      loan.fineAmount = null;
-      loan.status = LoanStatus.RETURNED;
+      loan.fineAmount = 0;
     }
 
-    if (loan.item) {
-      loan.item.availableCopies += 1;
-      await this.itemsRepo.save(loan.item);
-    }
+    return this.loansRepo.save(loan);
+  }
 
+  async markLost(id: string): Promise<Loan> {
+    const loan = await this.loansRepo.findOne({ where: { id } });
+    if (!loan) {
+      throw new NotFoundException(`Préstamo ${id} no encontrado`);
+    }
+    if (TERMINAL_STATUSES.includes(loan.status)) {
+      throw new BadRequestException(
+        `No se puede modificar un préstamo en estado "${loan.status}"`,
+      );
+    }
+    if (!RETURNABLE_STATUSES.includes(loan.status)) {
+      throw new BadRequestException(
+        `Transición inválida desde estado "${loan.status}"`,
+      );
+    }
+    loan.status = LoanStatus.LOST;
     return this.loansRepo.save(loan);
   }
 }

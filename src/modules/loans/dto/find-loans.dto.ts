@@ -28,4 +28,9 @@ export class FindLoansDto {
   @IsOptional()
   @IsUUID()
   userId?: string;
+
+  @ApiPropertyOptional({ description: 'Filtrar por item' })
+  @IsOptional()
+  @IsUUID()
+  itemId?: string;
 }
