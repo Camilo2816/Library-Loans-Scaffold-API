@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createTestApp, destroyApp, truncateAll } from './helpers/test-app.factory';
 import { createUserWithRole } from './helpers/auth.helper';
 import { UserRole } from '../src/modules/users/entities/user.entity';
+import { ItemType } from '../src/modules/items/entities/item.entity';
 
 describe('Items (e2e)', () => {
   let app: INestApplication;
@@ -23,24 +24,25 @@ describe('Items (e2e)', () => {
     return request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Libro Test', author: 'Autor Test', totalCopies: 3, ...overrides });
+      .send({ code: 'LIB-001', title: 'Libro Test', type: ItemType.BOOK, ...overrides });
   }
 
-  it('LIBRARIAN crea ítem; MEMBER lo lista; ADMIN lo elimina', async () => {
+  it('LIBRARIAN crea ítem; MEMBER lo lista con isAvailable; ADMIN lo elimina', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
     const member = await createUserWithRole(app, UserRole.MEMBER);
     const admin = await createUserWithRole(app, UserRole.ADMIN);
 
     const created = await createItem(librarian.accessToken).expect(201);
-    expect(created.body.title).toBe('Libro Test');
-    expect(created.body.availableCopies).toBe(3);
+    expect(created.body.code).toBe('LIB-001');
+    expect(created.body.type).toBe(ItemType.BOOK);
+    expect(created.body.isAvailable).toBe(true);
 
     const list = await request(app.getHttpServer())
       .get('/api/items')
       .set('Authorization', `Bearer ${member.accessToken}`)
       .expect(200);
     expect(list.body.data).toHaveLength(1);
-    expect(list.body.total).toBe(1);
+    expect(list.body.data[0].isAvailable).toBe(true);
 
     await request(app.getHttpServer())
       .delete(`/api/items/${created.body.id}`)
@@ -54,12 +56,10 @@ describe('Items (e2e)', () => {
     expect(afterDelete.body.data).toHaveLength(0);
   });
 
-  it('rechaza ISBN duplicado con 400', async () => {
+  it('rechaza código duplicado con 409', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    await createItem(librarian.accessToken, { isbn: '978-1-23-456789-0' }).expect(201);
-    await createItem(librarian.accessToken, { isbn: '978-1-23-456789-0', title: 'Otro' }).expect(
-      400,
-    );
+    await createItem(librarian.accessToken, { code: 'DUP-001' }).expect(201);
+    await createItem(librarian.accessToken, { code: 'DUP-001', title: 'Otro' }).expect(409);
   });
 
   it('MEMBER no puede crear ítems (403)', async () => {
@@ -67,37 +67,37 @@ describe('Items (e2e)', () => {
     await createItem(member.accessToken).expect(403);
   });
 
-  it('LIBRARIAN puede actualizar un ítem', async () => {
+  it('LIBRARIAN puede actualizar title y type de un ítem', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
     const item = await createItem(librarian.accessToken).expect(201);
 
     const updated = await request(app.getHttpServer())
       .patch(`/api/items/${item.body.id}`)
       .set('Authorization', `Bearer ${librarian.accessToken}`)
-      .send({ title: 'Título actualizado' })
+      .send({ title: 'Título actualizado', type: ItemType.MAGAZINE })
       .expect(200);
     expect(updated.body.title).toBe('Título actualizado');
+    expect(updated.body.type).toBe(ItemType.MAGAZINE);
   });
 
   it('GET /api/items sin token responde 401', async () => {
     await request(app.getHttpServer()).get('/api/items').expect(401);
   });
 
-  it('busca ítems por título (search)', async () => {
+  it('filtra ítems por type', async () => {
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    await createItem(librarian.accessToken, { title: 'Don Quijote', author: 'Cervantes' }).expect(
-      201,
-    );
+    await createItem(librarian.accessToken, { code: 'B-001', type: ItemType.BOOK }).expect(201);
     await createItem(librarian.accessToken, {
-      title: 'Cien años de soledad',
-      author: 'García Márquez',
+      code: 'M-001',
+      title: 'Revista',
+      type: ItemType.MAGAZINE,
     }).expect(201);
 
     const res = await request(app.getHttpServer())
-      .get('/api/items?search=Quijote')
+      .get(`/api/items?type=${ItemType.BOOK}`)
       .set('Authorization', `Bearer ${librarian.accessToken}`)
       .expect(200);
     expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].title).toBe('Don Quijote');
+    expect(res.body.data[0].type).toBe(ItemType.BOOK);
   });
 });

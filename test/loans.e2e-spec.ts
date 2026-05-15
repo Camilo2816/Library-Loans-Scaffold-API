@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import { createTestApp, destroyApp, truncateAll } from './helpers/test-app.factory';
 import { createUserWithRole } from './helpers/auth.helper';
 import { UserRole } from '../src/modules/users/entities/user.entity';
-import { Item } from '../src/modules/items/entities/item.entity';
+import { Item, ItemType } from '../src/modules/items/entities/item.entity';
 import { Loan, LoanStatus } from '../src/modules/loans/entities/loan.entity';
 
 describe('Loans (e2e)', () => {
@@ -22,39 +22,33 @@ describe('Loans (e2e)', () => {
     await truncateAll(app);
   });
 
-  async function seedItem(availableCopies = 3): Promise<Item> {
+  async function seedItem(code = 'T-001'): Promise<Item> {
     const ds = app.get(DataSource);
     const repo = ds.getRepository(Item);
     return repo.save(
-      repo.create({
-        title: 'Libro Test',
-        author: 'Autor Test',
-        isbn: null,
-        description: null,
-        totalCopies: availableCopies,
-        availableCopies,
-        isActive: true,
-      }),
+      repo.create({ code, title: 'Libro Test', type: ItemType.BOOK, isActive: true }),
     );
   }
 
-  it('flujo completo: MEMBER pide préstamo → LIBRARIAN registra devolución a tiempo', async () => {
+  function futureDueAt(days = 10): string {
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  async function createLoan(librarianToken: string, userId: string, itemId: string) {
+    return request(app.getHttpServer())
+      .post('/api/loans')
+      .set('Authorization', `Bearer ${librarianToken}`)
+      .send({ userId, itemId, dueAt: futureDueAt() });
+  }
+
+  it('flujo completo: LIBRARIAN crea préstamo para MEMBER → devuelve a tiempo → fineAmount 0', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    const item = await seedItem(2);
+    const item = await seedItem();
 
-    const loan = await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: item.id })
-      .expect(201);
-
+    const loan = await createLoan(librarian.accessToken, member.user.id, item.id).expect(201);
     expect(loan.body.status).toBe(LoanStatus.ACTIVE);
     expect(loan.body.userId).toBe(member.user.id);
-
-    const ds = app.get(DataSource);
-    const itemAfter = await ds.getRepository(Item).findOneBy({ id: item.id });
-    expect(itemAfter!.availableCopies).toBe(1);
 
     const returned = await request(app.getHttpServer())
       .patch(`/api/loans/${loan.body.id}/return`)
@@ -62,163 +56,107 @@ describe('Loans (e2e)', () => {
       .expect(200);
 
     expect(returned.body.status).toBe(LoanStatus.RETURNED);
-    expect(returned.body.fineAmount).toBeNull();
-
-    const itemRestored = await ds.getRepository(Item).findOneBy({ id: item.id });
-    expect(itemRestored!.availableCopies).toBe(2);
+    expect(Number(returned.body.fineAmount)).toBe(0);
   });
 
-  it('LIBRARIAN registra devolución tardía → status OVERDUE y multa calculada', async () => {
+  it('devolución tardía → status returned y multa calculada con Math.ceil', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    const item = await seedItem();
+    const item = await seedItem('T-002');
 
-    const loan = await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: item.id })
-      .expect(201);
+    const loan = await createLoan(librarian.accessToken, member.user.id, item.id).expect(201);
 
-    // Forzar dueDate al pasado (5 días atrás)
     const ds = app.get(DataSource);
     const pastDue = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
-    await ds.getRepository(Loan).update(loan.body.id, { dueDate: pastDue });
+    await ds.query(`UPDATE loans SET "dueAt" = $1 WHERE id = $2`, [pastDue, loan.body.id]);
 
     const returned = await request(app.getHttpServer())
       .patch(`/api/loans/${loan.body.id}/return`)
       .set('Authorization', `Bearer ${librarian.accessToken}`)
       .expect(200);
 
-    expect(returned.body.status).toBe(LoanStatus.OVERDUE);
-    expect(parseFloat(returned.body.fineAmount)).toBeGreaterThan(0);
-    // 5 días × 0.50 = 2.50
-    expect(parseFloat(returned.body.fineAmount)).toBeCloseTo(2.5, 1);
+    expect(returned.body.status).toBe(LoanStatus.RETURNED);
+    expect(Number(returned.body.fineAmount)).toBeCloseTo(2.5, 1);
   });
 
-  it('rechaza préstamo si no hay copias disponibles (400)', async () => {
+  it('rechaza préstamo si ítem ya tiene préstamo activo (409)', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
-    const item = await seedItem(0);
+    const member2 = await createUserWithRole(app, UserRole.MEMBER);
+    const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
+    const item = await seedItem('T-003');
 
-    await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: item.id })
-      .expect(400);
+    await createLoan(librarian.accessToken, member.user.id, item.id).expect(201);
+    await createLoan(librarian.accessToken, member2.user.id, item.id).expect(409);
   });
 
-  it(`rechaza préstamo si el usuario ya tiene ${process.env.MAX_ACTIVE_LOANS ?? 3} activos (400)`, async () => {
+  it('rechaza préstamo si usuario ya tiene 3 activos (409)', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
+    const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
     const ds = app.get(DataSource);
     const itemRepo = ds.getRepository(Item);
     const loanRepo = ds.getRepository(Loan);
 
-    // Crear 3 préstamos activos directamente en BD
     for (let i = 0; i < 3; i++) {
       const item = await itemRepo.save(
-        itemRepo.create({
-          title: `Libro ${i}`,
-          author: 'A',
-          totalCopies: 1,
-          availableCopies: 0,
-          isbn: null,
-          description: null,
-          isActive: true,
-        }),
+        itemRepo.create({ code: `SEED-${i}`, title: `Libro ${i}`, type: ItemType.BOOK, isActive: true }),
       );
-      const due = new Date();
-      due.setDate(due.getDate() + 30);
+      const dueAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       await loanRepo.save(
         loanRepo.create({
           userId: member.user.id,
           itemId: item.id,
-          loanDate: new Date(),
-          dueDate: due,
+          loanedAt: new Date(),
+          dueAt,
           status: LoanStatus.ACTIVE,
-          returnDate: null,
+          returnedAt: null,
           fineAmount: null,
         }),
       );
     }
 
-    const newItem = await itemRepo.save(
-      itemRepo.create({
-        title: 'Extra',
-        author: 'A',
-        totalCopies: 1,
-        availableCopies: 1,
-        isbn: null,
-        description: null,
-        isActive: true,
-      }),
+    const extra = await itemRepo.save(
+      itemRepo.create({ code: 'EXTRA-1', title: 'Extra', type: ItemType.BOOK, isActive: true }),
     );
+    await createLoan(librarian.accessToken, member.user.id, extra.id).expect(409);
+  });
 
+  it('rechaza dueAt inválido (pasado) con 400', async () => {
+    const member = await createUserWithRole(app, UserRole.MEMBER);
+    const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
+    const item = await seedItem('T-004');
+
+    const pastDueAt = new Date(Date.now() - 1000).toISOString();
     await request(app.getHttpServer())
       .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: newItem.id })
+      .set('Authorization', `Bearer ${librarian.accessToken}`)
+      .send({ userId: member.user.id, itemId: item.id, dueAt: pastDueAt })
       .expect(400);
   });
 
-  it('MEMBER solo ve sus propios préstamos', async () => {
-    const member1 = await createUserWithRole(app, UserRole.MEMBER);
-    const member2 = await createUserWithRole(app, UserRole.MEMBER);
-    const item1 = await seedItem();
-    const item2 = await seedItem();
-
-    await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member1.accessToken}`)
-      .send({ itemId: item1.id })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member2.accessToken}`)
-      .send({ itemId: item2.id })
-      .expect(201);
-
-    const list1 = await request(app.getHttpServer())
-      .get('/api/loans')
-      .set('Authorization', `Bearer ${member1.accessToken}`)
-      .expect(200);
-    expect(list1.body.data).toHaveLength(1);
-    expect(list1.body.data[0].userId).toBe(member1.user.id);
-  });
-
-  it('LIBRARIAN ve todos los préstamos', async () => {
+  it('MEMBER puede ver sus propios préstamos pero no los de otros', async () => {
     const member1 = await createUserWithRole(app, UserRole.MEMBER);
     const member2 = await createUserWithRole(app, UserRole.MEMBER);
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    const item1 = await seedItem();
-    const item2 = await seedItem();
+    const item1 = await seedItem('T-005');
+    const item2 = await seedItem('T-006');
 
-    await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member1.accessToken}`)
-      .send({ itemId: item1.id })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member2.accessToken}`)
-      .send({ itemId: item2.id })
-      .expect(201);
+    await createLoan(librarian.accessToken, member1.user.id, item1.id).expect(201);
+    await createLoan(librarian.accessToken, member2.user.id, item2.id).expect(201);
 
     const list = await request(app.getHttpServer())
       .get('/api/loans')
-      .set('Authorization', `Bearer ${librarian.accessToken}`)
+      .set('Authorization', `Bearer ${member1.accessToken}`)
       .expect(200);
-    expect(list.body.data).toHaveLength(2);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].userId).toBe(member1.user.id);
   });
 
   it('MEMBER no puede registrar una devolución (403)', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
-    const item = await seedItem();
+    const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
+    const item = await seedItem('T-007');
 
-    const loan = await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: item.id })
-      .expect(201);
+    const loan = await createLoan(librarian.accessToken, member.user.id, item.id).expect(201);
 
     await request(app.getHttpServer())
       .patch(`/api/loans/${loan.body.id}/return`)
@@ -226,21 +164,18 @@ describe('Loans (e2e)', () => {
       .expect(403);
   });
 
-  it('devolución de préstamo ya devuelto responde 400', async () => {
+  it('mark-lost cambia estado a lost y bloquea devolución posterior', async () => {
     const member = await createUserWithRole(app, UserRole.MEMBER);
     const librarian = await createUserWithRole(app, UserRole.LIBRARIAN);
-    const item = await seedItem();
+    const item = await seedItem('T-008');
 
-    const loan = await request(app.getHttpServer())
-      .post('/api/loans')
-      .set('Authorization', `Bearer ${member.accessToken}`)
-      .send({ itemId: item.id })
-      .expect(201);
+    const loan = await createLoan(librarian.accessToken, member.user.id, item.id).expect(201);
 
     await request(app.getHttpServer())
-      .patch(`/api/loans/${loan.body.id}/return`)
+      .patch(`/api/loans/${loan.body.id}/mark-lost`)
       .set('Authorization', `Bearer ${librarian.accessToken}`)
-      .expect(200);
+      .expect(200)
+      .expect((r) => expect(r.body.status).toBe(LoanStatus.LOST));
 
     await request(app.getHttpServer())
       .patch(`/api/loans/${loan.body.id}/return`)

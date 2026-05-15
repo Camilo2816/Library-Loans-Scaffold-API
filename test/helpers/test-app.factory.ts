@@ -48,7 +48,7 @@ export async function createTestApp(): Promise<INestApplication> {
 export async function truncateAll(app: INestApplication): Promise<void> {
   const ds = app.get(DataSource);
   await ds.query(
-    'TRUNCATE TABLE "loans", "refresh_tokens", "items", "users" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "reservations", "loans", "refresh_tokens", "items", "users" RESTART IDENTITY CASCADE',
   );
 }
 
