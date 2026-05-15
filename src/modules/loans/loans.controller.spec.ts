@@ -19,13 +19,15 @@ describe('LoansController', () => {
       findAll: jest.fn().mockResolvedValue({ data: [mockLoan], total: 1, page: 1, limit: 20 }),
       findById: jest.fn().mockResolvedValue(mockLoan),
       returnLoan: jest.fn().mockResolvedValue({ ...mockLoan, status: LoanStatus.RETURNED }),
+      markLost: jest.fn().mockResolvedValue({ ...mockLoan, status: LoanStatus.LOST }),
     };
     controller = new LoansController(service);
   });
 
   it('create delega al service con dto y actor', async () => {
-    await controller.create({ itemId: 'i-1' }, memberActor);
-    expect(service.create).toHaveBeenCalledWith({ itemId: 'i-1' }, memberActor);
+    const dto = { userId: 'u-1', itemId: 'i-1', dueAt: '2026-06-15T00:00:00.000Z' };
+    await controller.create(dto, memberActor);
+    expect(service.create).toHaveBeenCalledWith(dto, memberActor);
   });
 
   it('findAll delega al service con query y actor', async () => {
@@ -45,5 +47,11 @@ describe('LoansController', () => {
     const out = await controller.returnLoan('l-1');
     expect(service.returnLoan).toHaveBeenCalledWith('l-1');
     expect(out.status).toBe(LoanStatus.RETURNED);
+  });
+
+  it('markLost delega al service con el id del préstamo', async () => {
+    const out = await controller.markLost('l-1');
+    expect(service.markLost).toHaveBeenCalledWith('l-1');
+    expect(out.status).toBe(LoanStatus.LOST);
   });
 });

@@ -1,10 +1,11 @@
 import { ItemsController } from './items.controller';
+import { ItemType } from './entities/item.entity';
 
 describe('ItemsController', () => {
   let controller: ItemsController;
   let service: any;
 
-  const mockItem = { id: 'i-1', title: 'Libro', author: 'Autor', availableCopies: 3 };
+  const mockItem = { id: 'i-1', code: 'LIB-001', title: 'Libro', type: ItemType.BOOK, isAvailable: true };
 
   beforeEach(() => {
     service = {
@@ -18,8 +19,9 @@ describe('ItemsController', () => {
   });
 
   it('create delega al service', async () => {
-    await controller.create({ title: 'Libro', author: 'Autor' });
-    expect(service.create).toHaveBeenCalledWith({ title: 'Libro', author: 'Autor' });
+    const dto = { code: 'LIB-001', title: 'Libro', type: ItemType.BOOK };
+    await controller.create(dto);
+    expect(service.create).toHaveBeenCalledWith(dto);
   });
 
   it('findAll delega al service con query', async () => {

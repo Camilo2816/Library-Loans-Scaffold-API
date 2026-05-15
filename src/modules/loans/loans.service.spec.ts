@@ -1,10 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { LoansService } from './loans.service';
 import { Loan, LoanStatus } from './entities/loan.entity';
-import { Item } from '../items/entities/item.entity';
+import { Item, ItemType } from '../items/entities/item.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { AuthenticatedUser } from '@common/decorators/current-user.decorator';
 
@@ -20,12 +25,9 @@ describe('LoansService', () => {
   const makeItem = (overrides: Partial<Item> = {}): Item =>
     ({
       id: 'i-1',
+      code: 'LIB-001',
       title: 'Libro',
-      author: 'Autor',
-      isbn: null,
-      description: null,
-      totalCopies: 3,
-      availableCopies: 3,
+      type: ItemType.BOOK,
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -33,22 +35,28 @@ describe('LoansService', () => {
     }) as Item;
 
   const makeLoan = (overrides: Partial<Loan> = {}): Loan => {
-    const loanDate = new Date();
-    const dueDate = new Date(loanDate);
-    dueDate.setDate(dueDate.getDate() + 30);
+    const loanedAt = new Date();
+    const dueAt = new Date(loanedAt);
+    dueAt.setDate(dueAt.getDate() + 30);
     return {
       id: 'l-1',
       userId: 'u-1',
       itemId: 'i-1',
-      loanDate,
-      dueDate,
-      returnDate: null,
+      loanedAt,
+      dueAt,
+      returnedAt: null,
       status: LoanStatus.ACTIVE,
       fineAmount: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       ...overrides,
     } as Loan;
+  };
+
+  const futureDueAt = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 10);
+    return d.toISOString();
   };
 
   beforeEach(async () => {
@@ -94,48 +102,134 @@ describe('LoansService', () => {
     service = module.get(LoansService);
   });
 
-  describe('create', () => {
-    it('lanza BadRequestException si el usuario supera el límite de préstamos activos', async () => {
-      loansRepo.count.mockResolvedValue(3);
-      await expect(service.create({ itemId: 'i-1' }, memberActor)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-    });
-
-    it('lanza NotFoundException si el ítem no existe', async () => {
+  // ─── Caso obligatorio 1: Crear préstamo exitoso ────────────────────────────
+  describe('create — caso exitoso', () => {
+    it('crea el préstamo con los campos correctos cuando todo es válido', async () => {
       loansRepo.count.mockResolvedValue(0);
-      itemsRepo.findOne.mockResolvedValue(null);
-      await expect(service.create({ itemId: 'i-1' }, memberActor)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
-    });
+      loansRepo.findOne.mockResolvedValue(null); // item sin préstamo activo
+      itemsRepo.findOne.mockResolvedValue(makeItem());
 
-    it('lanza BadRequestException si no hay copias disponibles', async () => {
-      loansRepo.count.mockResolvedValue(0);
-      itemsRepo.findOne.mockResolvedValue(makeItem({ availableCopies: 0 }));
-      await expect(service.create({ itemId: 'i-1' }, memberActor)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-    });
+      const dto = { userId: 'u-1', itemId: 'i-1', dueAt: futureDueAt() };
+      await service.create(dto, memberActor);
 
-    it('crea el préstamo, decrementa availableCopies y calcula dueDate', async () => {
-      loansRepo.count.mockResolvedValue(0);
-      const item = makeItem({ availableCopies: 2 });
-      itemsRepo.findOne.mockResolvedValue(item);
-      await service.create({ itemId: 'i-1' }, memberActor);
-      expect(item.availableCopies).toBe(1);
-      expect(itemsRepo.save).toHaveBeenCalledWith(item);
       expect(loansRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'u-1', itemId: 'i-1', status: LoanStatus.ACTIVE }),
+        expect.objectContaining({
+          userId: 'u-1',
+          itemId: 'i-1',
+          status: LoanStatus.ACTIVE,
+          returnedAt: null,
+        }),
       );
-      const call = loansRepo.create.mock.calls[0][0] as Loan;
-      const diffDays = Math.round(
-        (call.dueDate.getTime() - call.loanDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      expect(diffDays).toBe(30);
+      expect(loansRepo.save).toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si dueAt no es posterior a hoy', async () => {
+      loansRepo.count.mockResolvedValue(0);
+      const pastDueAt = new Date(Date.now() - 1000).toISOString();
+      await expect(
+        service.create({ userId: 'u-1', itemId: 'i-1', dueAt: pastDueAt }, memberActor),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('lanza BadRequestException si dueAt supera MAX_LOAN_DAYS', async () => {
+      loansRepo.count.mockResolvedValue(0);
+      const farFuture = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString();
+      await expect(
+        service.create({ userId: 'u-1', itemId: 'i-1', dueAt: farFuture }, memberActor),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
+  // ─── Caso obligatorio 2: Item ya prestado → 409 ───────────────────────────
+  describe('create — item ya prestado (R2)', () => {
+    it('lanza ConflictException (409) si el item ya tiene un préstamo activo', async () => {
+      loansRepo.count.mockResolvedValue(0);
+      itemsRepo.findOne.mockResolvedValue(makeItem());
+      loansRepo.findOne.mockResolvedValue(makeLoan()); // item ocupado
+
+      await expect(
+        service.create({ userId: 'u-1', itemId: 'i-1', dueAt: futureDueAt() }, memberActor),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  // ─── Caso obligatorio 3: Usuario supera límite → 409 ──────────────────────
+  describe('create — usuario supera límite (R3)', () => {
+    it('lanza ConflictException (409) si el usuario ya tiene 3 préstamos activos', async () => {
+      loansRepo.count.mockResolvedValue(3);
+
+      await expect(
+        service.create({ userId: 'u-1', itemId: 'i-1', dueAt: futureDueAt() }, memberActor),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  // ─── Caso obligatorio 4: Cálculo de multa con Math.ceil ───────────────────
+  describe('returnLoan — cálculo de multa (R4)', () => {
+    it('calcula multa de 2.50 USD por 5 días de retraso (Math.ceil)', async () => {
+      const pastDue = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+      const loan = makeLoan({ dueAt: pastDue });
+      loansRepo.findOne.mockResolvedValue(loan);
+
+      await service.returnLoan('l-1');
+
+      const saved = loansRepo.save.mock.calls[0][0] as Loan;
+      expect(saved.status).toBe(LoanStatus.RETURNED);
+      expect(saved.fineAmount).toBe(2.5);
+    });
+
+    it('no aplica multa si se devuelve a tiempo (fineAmount = 0)', async () => {
+      const loan = makeLoan();
+      loansRepo.findOne.mockResolvedValue(loan);
+
+      await service.returnLoan('l-1');
+
+      const saved = loansRepo.save.mock.calls[0][0] as Loan;
+      expect(saved.status).toBe(LoanStatus.RETURNED);
+      expect(saved.fineAmount).toBe(0);
+    });
+
+    it('acepta devolver un préstamo en estado overdue', async () => {
+      const pastDue = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      const loan = makeLoan({ status: LoanStatus.OVERDUE, dueAt: pastDue });
+      loansRepo.findOne.mockResolvedValue(loan);
+
+      await service.returnLoan('l-1');
+
+      const saved = loansRepo.save.mock.calls[0][0] as Loan;
+      expect(saved.status).toBe(LoanStatus.RETURNED);
+      expect(saved.fineAmount).toBeGreaterThan(0);
+    });
+
+    it('lanza BadRequestException si el préstamo ya está en estado terminal', async () => {
+      loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.RETURNED }));
+      await expect(service.returnLoan('l-1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // ─── FSM: markLost ────────────────────────────────────────────────────────
+  describe('markLost', () => {
+    it('marca como lost un préstamo active', async () => {
+      loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.ACTIVE }));
+      await service.markLost('l-1');
+      const saved = loansRepo.save.mock.calls[0][0] as Loan;
+      expect(saved.status).toBe(LoanStatus.LOST);
+    });
+
+    it('marca como lost un préstamo overdue', async () => {
+      loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.OVERDUE }));
+      await service.markLost('l-1');
+      const saved = loansRepo.save.mock.calls[0][0] as Loan;
+      expect(saved.status).toBe(LoanStatus.LOST);
+    });
+
+    it('lanza BadRequestException si el préstamo ya está en estado terminal', async () => {
+      loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.LOST }));
+      await expect(service.markLost('l-1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // ─── findById ─────────────────────────────────────────────────────────────
   describe('findById', () => {
     it('lanza NotFoundException si el préstamo no existe', async () => {
       loansRepo.findOne.mockResolvedValue(null);
@@ -156,50 +250,6 @@ describe('LoansService', () => {
       loansRepo.findOne.mockResolvedValue(loan);
       const out = await service.findById('l-1', adminActor);
       expect(out).toBe(loan);
-    });
-  });
-
-  describe('returnLoan', () => {
-    it('lanza NotFoundException si el préstamo no existe', async () => {
-      loansRepo.findOne.mockResolvedValue(null);
-      await expect(service.returnLoan('nonexistent')).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('lanza BadRequestException si el préstamo ya fue devuelto', async () => {
-      loansRepo.findOne.mockResolvedValue(makeLoan({ status: LoanStatus.RETURNED }));
-      await expect(service.returnLoan('l-1')).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('marca como RETURNED sin multa si se devuelve a tiempo', async () => {
-      const loan = makeLoan();
-      loan.item = makeItem();
-      loansRepo.findOne.mockResolvedValue(loan);
-      const result = await service.returnLoan('l-1');
-      expect(loansRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ status: LoanStatus.RETURNED, fineAmount: null }),
-      );
-      expect(result.status ?? loansRepo.save.mock.calls[0][0].status).toBe(LoanStatus.RETURNED);
-    });
-
-    it('marca como OVERDUE y calcula multa si se devuelve tarde', async () => {
-      const pastDue = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
-      const loan = makeLoan({ dueDate: pastDue });
-      loan.item = makeItem();
-      loansRepo.findOne.mockResolvedValue(loan);
-      await service.returnLoan('l-1');
-      const saved = loansRepo.save.mock.calls[0][0] as Loan;
-      expect(saved.status).toBe(LoanStatus.OVERDUE);
-      expect(saved.fineAmount).toBeGreaterThan(0);
-    });
-
-    it('incrementa availableCopies del ítem al devolver', async () => {
-      const item = makeItem({ availableCopies: 1 });
-      const loan = makeLoan();
-      loan.item = item;
-      loansRepo.findOne.mockResolvedValue(loan);
-      await service.returnLoan('l-1');
-      expect(item.availableCopies).toBe(2);
-      expect(itemsRepo.save).toHaveBeenCalledWith(item);
     });
   });
 });
